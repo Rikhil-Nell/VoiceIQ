@@ -35,7 +35,7 @@ class TranscriptionService:
     async def transcribe_groq(self, file_path: str, prompt: str = "Specify context or spelling") -> str:
         """Uses Groq's Whisper API to transcribe audio."""
         _, file_bytes, _ = self._load_audio_file(file_path)
-
+        print(f"Processing: {file_path}")
         with open(file_path, "rb") as f:
             transcription = await self.groq_client.audio.transcriptions.create(
                 file=f,
