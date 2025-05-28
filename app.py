@@ -13,7 +13,8 @@ from uuid import uuid4, UUID
 import os
 from datetime import datetime
 from transcription import TranscriptionService
-
+import boto3
+from botocore.client import Config
 db = DatabaseHandler(deps)
 
 transcription_service = TranscriptionService(groq_client=async_groq_client)
@@ -206,6 +207,47 @@ async def signup(user: UserLogin):
         raise HTTPException(status_code=500, detail="User creation failed")
 
     return {"msg": "User created successfully"}
+
+
+
+
+
+
+# MinIO settings
+MINIO_ENDPOINT = "http://localhost:9000"
+ACCESS_KEY = "minioadmin"
+SECRET_KEY = "minioadmin"
+REGION = "us-east-1"
+EXPIRATION = 3600  # in seconds
+
+# Initialize S3 client
+s3 = boto3.client(
+    's3',
+    endpoint_url=MINIO_ENDPOINT,
+    aws_access_key_id=ACCESS_KEY,
+    aws_secret_access_key=SECRET_KEY,
+    config=Config(signature_version="s3v4"),
+    region_name=REGION
+)
+
+class PresignRequest(BaseModel):
+    bucket: str
+    key: str 
+
+@app.post("/generate-presigned-url")
+def generate_presigned_url(req: PresignRequest):
+    try:
+        s3.head_bucket(Bucket=req.bucket)
+    except:
+        s3.create_bucket(Bucket=req.bucket)
+
+
+    url = s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": req.bucket, "Key": req.key},
+        ExpiresIn=EXPIRATION
+    )
+    return {"url": url}
 
 
 if __name__ == "__main__":

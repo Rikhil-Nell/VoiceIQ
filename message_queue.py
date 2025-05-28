@@ -1,0 +1,13 @@
+import pika
+
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+channel.queue_declare(queue='hello')
+
+channel.basic_publish(exchange='',
+                      routing_key='hello',
+                      body='Hello from sonu!')
+print(" [x] Sent 'Hello RabbitMQ!'")
+
+connection.close()
