@@ -19,13 +19,14 @@ import boto3
 from transcription import TranscriptionService
 import logfire
 from settings import Settings
+from typing import Optional, Dict, Any
 
 settings = Settings()
 
 s3 = boto3.client(
     "s3",
-    #aws_access_key_id=settings.aws_access_key,
-    #aws_secret_access_key=settings.aws_secret_access_key,
+    # aws_access_key_id=settings.aws_access_key,
+    # aws_secret_access_key=settings.aws_secret_access_key,
     #region_name="us-east-1"  # Adjust region as needed
 )
 
@@ -73,6 +74,12 @@ class VoiceChatRequest(BaseModel):
     file: UploadFile = File(...)
     uuid: UUID
 
+# search elements in database
+class SearchRequest(BaseModel):
+    filters: Optional[Dict[str, str]] = None 
+    limit: int = 20
+    offset: int = 0
+
 @app.post("/logs/date")
 async def get_all_by_dates(req: Dates):
     try:
@@ -80,16 +87,6 @@ async def get_all_by_dates(req: Dates):
         return {"data": call_logs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/logs/all")
-# async def get_all_logs():
-#     try:
-#         result = await db.get_all_logs()
-#         return {"data": result}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 
 @app.get("/logs/all")
 async def get_all_logs(limit: int = Query(30, gt=0), offset: int = Query(0, ge=0)):
@@ -185,6 +182,102 @@ async def process_and_update_log(filename: str, log_id: str):
     update_data = {**payload, "status": "complete"}
     await db.update_call_log(log_id, update_data)
 
+# data filtering by date range
+@app.post("/logs/datefilter")
+async def filter_logs_by_date(req: Dict[str, Any]):
+    try:
+        filters = req.get("datefilter", {})
+        call_date_from = filters.get("call_date_from")
+        call_date_to = filters.get("call_date_to")
+        limit = req.get("limit", 20)
+        offset = req.get("offset", 0)
+
+        # Only select needed columns
+        columns = "id,call_type,call_date,caller_name,toll_free_did,customer_number,report_generated, status, filename"
+        query = db.client.table(db.table).select(columns)
+
+        # Apply date filters
+        if call_date_from:
+            query = query.gte("call_date", call_date_from)
+        if call_date_to:
+            query = query.lte("call_date", call_date_to)
+
+        # Get total count (no pagination)
+        total_query = db.client.table(db.table).select("id", count="exact")
+        if call_date_from:
+            total_query = total_query.gte("call_date", call_date_from)
+        if call_date_to:
+            total_query = total_query.lte("call_date", call_date_to)
+        total_result = total_query.execute()
+        total_count = total_result.count or 0
+
+        # Apply pagination
+        query = query.order("created_at", desc=False).range(offset, offset + limit - 1)
+        result = query.execute()
+
+        return {
+            "data": result.data or [],
+            "limit": limit,
+            "offset": offset,
+            "total": total_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))  
+
+# Search logs with filters and sorting
+@app.post("/logs/searching")
+async def search_logs(req: Dict[str, Any]):
+    try:
+        filters = req.get("filters", {})
+        sort = req.get("sort", {})
+        limit = req.get("limit", 20)
+        offset = req.get("offset", 0)
+
+        columns = "id,call_date,call_type,caller_name,status,filename,customer_number,toll_free_did"
+        query = db.client.table(db.table).select(columns)
+
+        def apply_filters(query, filters):
+            if filters.get("call_date"):
+                query = query.eq("call_date", filters["call_date"])
+            if filters.get("call_type"):
+                query = query.eq("call_type", filters["call_type"])
+            if filters.get("caller_name"):
+                query = query.ilike("caller_name", f"%{filters['caller_name']}%")
+            if filters.get("customer_number"):
+                query = query.ilike("customer_number", f"%{filters['customer_number']}%")
+            if filters.get("toll_free_did"):
+                query = query.ilike("toll_free_did", f"%{filters['toll_free_did']}%")
+            if filters.get("status"):
+                query = query.ilike("status", f"%{filters['status']}%")
+            return query
+
+        # Usage in your endpoint:
+        query = db.client.table(db.table).select(columns)
+        query = apply_filters(query, filters)
+
+        total_query = db.client.table(db.table).select("id", count="exact")
+        total_query = apply_filters(total_query, filters)
+        total_result = total_query.execute()
+        total_count = total_result.count or 0
+
+        # Sorting
+        sort_column = sort.get("column", "created_at")
+        sort_direction = sort.get("direction", "desc")
+        query = query.order(sort_column, desc=(sort_direction == "desc"))
+
+        # Pagination
+        query = query.range(offset, offset + limit - 1)
+        result = query.execute()
+
+        return {
+            "data": result.data or [],
+            "limit": limit,
+            "offset": offset,
+            "total": total_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/chat")
 async def report_chat(ctx : ChatRequest):
     try:
@@ -245,7 +338,6 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
-
 @app.post("/login", response_model=Token)
 async def login(user: UserLogin):
     user_data = await db.get_user_by_email(user.email)
@@ -257,7 +349,6 @@ async def login(user: UserLogin):
 
     token = create_access_token(data={"sub": str(user_data["email"])})
     return {"access_token": token, "token_type": "bearer"}
-
 
 @app.post("/signup")
 async def signup(user: UserLogin):
