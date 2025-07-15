@@ -37,8 +37,8 @@ report_model = GroqModel(
 )
 
 class Form(BaseModel):
-    responder_name: str = Field(description="The first name of the responder attending to the request, if given, else return 'null'")
-    caller_name: str = Field(description="The first name of the caller making the request if given, else return 'null'")
+    responder_name: str = Field(description="The full name of the responder attending to the request, if given, else return 'null'")
+    caller_name: str = Field(description="The full name of the caller making the request if given, else return 'null'")
     request_type: str = Field(description="The type of request being made out of the list: [technical support, billing, new connection]")
     issue_summary: str = Field(description="Detailed description of 50 lines of the issue being reported by the caller")
     caller_sentiment: str = Field(description="The emotion of the customer to be given in one word out of the list: [happy, sad, angry, frustrated]")
